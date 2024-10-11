@@ -9,10 +9,27 @@ from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
-# Fungsi untuk memuat gambar dari folder
+# Fungsi untuk memuat dan menampilkan gambar dari unggahan pengguna
+def load_uploaded_images(uploaded_files):
+    images = []
+    filenames = []
+    for uploaded_file in uploaded_files:
+        try:
+            img = Image.open(uploaded_file).convert('RGB')
+            images.append(img)
+            filenames.append(uploaded_file.name)
+            st.write(f"Loaded image: {uploaded_file.name}")
+        except Exception as e:
+            st.error(f"Failed to read {uploaded_file.name}: {e}")
+    return images, filenames
+
+# Fungsi untuk memuat gambar dari folder lokal
 def load_images_from_folder(folder):
     images = []
     filenames = []
+    if not os.path.isdir(folder):
+        st.error("Path folder tidak valid atau tidak dapat diakses.")
+        return images, filenames
     for filename in os.listdir(folder):
         if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff')):
             img_path = os.path.join(folder, filename)
@@ -23,19 +40,6 @@ def load_images_from_folder(folder):
                 st.write(f"Loaded image: {filename}")
             except Exception as e:
                 st.error(f"Failed to read {filename}: {e}")
-    return images, filenames
-
-# Fungsi untuk memuat dan menampilkan gambar dari unggahan pengguna
-def load_uploaded_images(uploaded_files):
-    images = []
-    filenames = []
-    for uploaded_file in uploaded_files:
-        try:
-            img = Image.open(uploaded_file).convert('RGB')
-            images.append(img)
-            filenames.append(uploaded_file.name)
-        except Exception as e:
-            st.error(f"Failed to read {uploaded_file.name}: {e}")
     return images, filenames
 
 # Konversi gambar ke array numpy
@@ -59,7 +63,8 @@ def extract_features(image_array):
     for channel in range(3):
         histogram, _ = np.histogram(image_array[:, :, channel], bins=256, range=(0, 256))
         histogram = histogram.astype('float')
-        histogram /= histogram.sum()
+        if histogram.sum() != 0:
+            histogram /= histogram.sum()
         color_hist_features.extend(histogram)
     
     # Rata-rata warna
@@ -74,7 +79,8 @@ def extract_features(image_array):
     lbp = feature.local_binary_pattern(gray_image_uint8, P=8, R=1, method='uniform')
     lbp_hist, _ = np.histogram(lbp.ravel(), bins=np.arange(0, 11), range=(0, 10))
     lbp_hist = lbp_hist.astype('float')
-    lbp_hist /= lbp_hist.sum()
+    if lbp_hist.sum() != 0:
+        lbp_hist /= lbp_hist.sum()
     
     # Gabungkan fitur warna dan tekstur
     feature_vector = np.concatenate((color_hist_features, avg_color_features, lbp_hist))
@@ -113,83 +119,136 @@ def show_cluster_images(images, labels, filenames, cluster_num, num_images=5):
 def main():
     st.title("Aplikasi Klasterisasi Gambar")
     st.sidebar.header("Pengaturan")
-    st.sidebar.write("Pilih jumlah klaster, muat gambar, dan unggah citra tambahan untuk dikelompokkan menggunakan KMeans")
+    st.sidebar.write("""
+    **Langkah 1:** Pilih sumber data (Upload Gambar, Muat dari Folder, atau Keduanya).  
+    **Langkah 2:** Unggah atau muat gambar yang akan dikelompokkan.  
+    **Langkah 3:** Mulai klasterisasi.  
+    **Langkah 4:** (Opsional) Unggah gambar tambahan untuk diklasifikasikan ke dalam klaster yang sudah ada.
+    """)
     
-    # Langkah 1: Pilih jumlah klaster
-    k = st.sidebar.slider('Pilih jumlah klaster (k)', 2, 10, 4, key='k_slider')
+    # Langkah 1: Pilih Sumber Data
+    data_source = st.sidebar.radio(
+        "Pilih Sumber Data:",
+        ("Upload Gambar", "Muat Gambar dari Folder", "Upload + Muat Gambar dari Folder")
+    )
     
-    # Langkah 2: Muat gambar dari folder
-    st.sidebar.subheader("Muat Gambar dari Folder")
-    folder_path = st.sidebar.text_input("Masukkan path folder untuk memuat gambar:")
-    if st.sidebar.button("Muat Gambar", key='load_images'):
-        if folder_path:
-            images, filenames = load_images_from_folder(folder_path)
-            if len(images) == 0:
-                st.error("Tidak ada gambar yang ditemukan di folder yang ditentukan.")
-                return
-            st.success(f"{len(images)} gambar berhasil dimuat.")
-            
-            # Simpan gambar dan nama file dalam session state
-            st.session_state['images'] = images
-            st.session_state['filenames'] = filenames
-            st.session_state['folder_loaded'] = True
-        else:
-            st.error("Silakan masukkan path folder yang valid.")
+    # Inisialisasi session_state untuk menyimpan data
+    if 'images_local' not in st.session_state:
+        st.session_state['images_local'] = []
+    if 'filenames_local' not in st.session_state:
+        st.session_state['filenames_local'] = []
+    if 'images_uploaded' not in st.session_state:
+        st.session_state['images_uploaded'] = []
+    if 'filenames_uploaded' not in st.session_state:
+        st.session_state['filenames_uploaded'] = []
     
-    # Tombol untuk Memulai Klasterisasi
+    # Langkah 2: Unggah atau Muat Gambar Berdasarkan Sumber Data
+    if data_source == "Upload Gambar" or data_source == "Upload + Muat Gambar dari Folder":
+        st.sidebar.subheader("Unggah Gambar")
+        uploaded_files = st.sidebar.file_uploader(
+            "Unggah gambar Anda sendiri", 
+            accept_multiple_files=True, 
+            type=["png", "jpg", "jpeg", "bmp", "tiff"],
+            key='upload_main'
+        )
+        if uploaded_files:
+            uploaded_images, uploaded_filenames = load_uploaded_images(uploaded_files)
+            st.session_state['images_uploaded'].extend(uploaded_images)
+            st.session_state['filenames_uploaded'].extend(uploaded_filenames)
+    
+    if data_source == "Muat Gambar dari Folder" or data_source == "Upload + Muat Gambar dari Folder":
+        st.sidebar.subheader("Muat Gambar dari Folder")
+        folder_path = st.sidebar.text_input("Masukkan path folder untuk memuat gambar:")
+        if st.sidebar.button("Muat Gambar", key='load_images'):
+            if folder_path:
+                try:
+                    folder_images, folder_filenames = load_images_from_folder(folder_path)
+                    if len(folder_images) == 0:
+                        st.error("Tidak ada gambar yang ditemukan di folder yang ditentukan.")
+                    else:
+                        st.success(f"{len(folder_images)} gambar berhasil dimuat dari folder.")
+                        st.session_state['images_local'].extend(folder_images)
+                        st.session_state['filenames_local'].extend(folder_filenames)
+                except Exception as e:
+                    st.error(f"Error saat memuat gambar dari folder: {e}")
+            else:
+                st.error("Silakan masukkan path folder yang valid.")
+    
+    # Langkah 3: Mulai Klasterisasi
+    st.sidebar.subheader("Mulai Klasterisasi")
     if st.sidebar.button("Mulai Klasterisasi", key='start_clustering'):
-        if 'images' not in st.session_state or 'filenames' not in st.session_state:
-            st.error("Silakan muat gambar dari folder terlebih dahulu sebelum memulai klasterisasi.")
+        # Gabungkan gambar berdasarkan sumber data
+        combined_images = []
+        combined_filenames = []
+    
+        if data_source == "Upload Gambar":
+            combined_images = st.session_state['images_uploaded']
+            combined_filenames = st.session_state['filenames_uploaded']
+        elif data_source == "Muat Gambar dari Folder":
+            combined_images = st.session_state['images_local']
+            combined_filenames = st.session_state['filenames_local']
+        elif data_source == "Upload + Muat Gambar dari Folder":
+            combined_images = st.session_state['images_local'] + st.session_state['images_uploaded']
+            combined_filenames = st.session_state['filenames_local'] + st.session_state['filenames_uploaded']
+    
+        if not combined_images:
+            st.error("Tidak ada gambar yang tersedia untuk diklasterisasi. Silakan unggah atau muat gambar terlebih dahulu.")
+            return
+    
+        all_features = []
+        for image in combined_images:
+            original_image_array = convert_image_to_array(image)
+            resized_image_array = resize_image(original_image_array, size=(128, 128))
+            normalized_image_array = normalize_image(resized_image_array)
+    
+            features = extract_features(normalized_image_array)
+            all_features.append(features)
+    
+        X = np.array(all_features)
+        st.write(f"Total fitur yang dikumpulkan: {X.shape}")
+    
+        # Skala Fitur
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        st.session_state['scaler'] = scaler  # Simpan scaler ke session state
+    
+        # Klasterisasi KMeans
+        k = st.sidebar.slider('Pilih jumlah klaster (k)', 2, 10, 4, key='k_slider_clustering')
+        kmeans = KMeans(n_clusters=k, random_state=42)
+        labels = kmeans.fit_predict(X_scaled)
+        st.session_state['kmeans'] = kmeans  # Simpan model KMeans ke session state
+        st.session_state['labels'] = labels  # Simpan label ke session state
+    
+        st.success(f"Klasterisasi KMeans diterapkan dengan k={k}.")
+    
+        # Evaluasi Silhouette Score
+        sil_score = silhouette_score(X_scaled, labels)
+        st.write(f"Silhouette Score untuk k={k}: {sil_score:.4f}")
+    
+        # Visualisasi PCA
+        visualize_clusters(X_scaled, labels)
+    
+        # Menampilkan gambar dari setiap klaster
+        st.subheader("Gambar per Klaster")
+        for cluster in range(k):
+            show_cluster_images(combined_images, labels, combined_filenames, cluster_num=cluster, num_images=5)
+    
+    # Langkah 4: Unggah Gambar Tambahan (Opsional)
+    st.sidebar.subheader("Unggah Gambar Tambahan")
+    uploaded_additional_files = st.sidebar.file_uploader(
+        "Unggah gambar tambahan", 
+        accept_multiple_files=True, 
+        type=["png", "jpg", "jpeg", "bmp", "tiff"], 
+        key='additional_upload'
+    )
+    
+    if st.sidebar.button("Klasifikasikan Gambar Tambahan", key='classify_additional'):
+        if not uploaded_additional_files:
+            st.error("Silakan unggah gambar tambahan terlebih dahulu.")
+        elif 'kmeans' not in st.session_state or 'scaler' not in st.session_state:
+            st.warning("Silakan muat dan klasterisasi gambar terlebih dahulu sebelum mengklasifikasikan gambar tambahan.")
         else:
-            images = st.session_state['images']
-            filenames = st.session_state['filenames']
-            
-            all_features = []
-            for image in images:
-                original_image_array = convert_image_to_array(image)
-                resized_image_array = resize_image(original_image_array, size=(128, 128))
-                normalized_image_array = normalize_image(resized_image_array)
-    
-                features = extract_features(normalized_image_array)
-                all_features.append(features)
-    
-            X = np.array(all_features)
-            st.write(f"Total fitur yang dikumpulkan: {X.shape}")
-    
-            # Skala Fitur
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X)
-            st.session_state['scaler'] = scaler  # Simpan scaler ke session state
-    
-            # Klasterisasi KMeans
-            kmeans = KMeans(n_clusters=k, random_state=42)
-            labels = kmeans.fit_predict(X_scaled)
-            st.session_state['kmeans'] = kmeans  # Simpan model KMeans ke session state
-            st.session_state['labels'] = labels  # Simpan label ke session state
-    
-            st.write(f"Klasterisasi KMeans diterapkan dengan k={k}.")
-    
-            # Evaluasi Silhouette Score
-            sil_score = silhouette_score(X_scaled, labels)
-            st.write(f"Silhouette Score untuk k={k}: {sil_score:.4f}")
-    
-            # Visualisasi PCA
-            visualize_clusters(X_scaled, labels)
-    
-            # Menampilkan gambar dari setiap klaster
-            st.subheader("Gambar per Klaster")
-            for cluster in range(k):
-                show_cluster_images(images, labels, filenames, cluster_num=cluster, num_images=5)
-    
-    # Langkah 3: Unggah gambar tambahan
-    st.sidebar.subheader("Unggah Citra Tambahan")
-    uploaded_files = st.sidebar.file_uploader("Unggah gambar Anda sendiri", accept_multiple_files=True, type=["png", "jpg", "jpeg", "bmp", "tiff"])
-    
-    if uploaded_files:
-        if 'kmeans' not in st.session_state or 'scaler' not in st.session_state:
-            st.warning("Silakan muat dan klasterisasi gambar dari folder terlebih dahulu untuk melakukan klasterisasi pada gambar yang diunggah.")
-        else:
-            images_uploaded, filenames_uploaded = load_uploaded_images(uploaded_files)
+            images_uploaded, filenames_uploaded = load_uploaded_images(uploaded_additional_files)
     
             all_features_uploaded = []
             for image in images_uploaded:
@@ -213,17 +272,17 @@ def main():
     
             # Menampilkan hasil untuk gambar yang diunggah
             st.subheader("Hasil Klasterisasi untuk Gambar yang Diunggah")
-            for i, uploaded_file in enumerate(uploaded_files):
+            for i, uploaded_file in enumerate(uploaded_additional_files):
                 st.write(f"Gambar '{uploaded_file.name}' termasuk dalam klaster: {labels_uploaded[i]}")
     
             # Menampilkan gambar dari file yang diunggah per klaster
             st.subheader("Gambar Unggahan per Klaster")
             for cluster in range(k):
-                show_cluster_images(images_uploaded, labels_uploaded, [file.name for file in uploaded_files], cluster_num=cluster)
+                show_cluster_images(images_uploaded, labels_uploaded, [file.name for file in uploaded_additional_files], cluster_num=cluster)
     
     # Menampilkan gambar yang diunggah di main area (opsional)
     # Uncomment jika ingin menampilkan gambar di main area
-    # if 'images' in st.session_state and 'labels' in st.session_state:
+    # if 'labels' in st.session_state and 'images' in st.session_state and 'filenames' in st.session_state:
     #     images = st.session_state['images']
     #     filenames = st.session_state['filenames']
     #     labels = st.session_state['labels']
