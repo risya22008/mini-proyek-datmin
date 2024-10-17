@@ -1,6 +1,7 @@
-numpy
-matplotlib
-Pillow
 streamlit
-scikit-image
+numpy
+opencv-python-headless
+matplotlib
 scikit-learn
+pillow
+scipy

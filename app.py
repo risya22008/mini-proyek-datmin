@@ -7,15 +7,6 @@ from sklearn.metrics import silhouette_score
 from PIL import Image
 from scipy import ndimage
 
-import streamlit as st
-import numpy as np
-import cv2
-import matplotlib.pyplot as plt
-from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score
-from PIL import Image
-from scipy import ndimage
-
 # Set page configuration
 st.set_page_config(page_title="Image Segmentation App", layout="wide")
 
