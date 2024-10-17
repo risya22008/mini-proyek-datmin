@@ -48,7 +48,14 @@ st.markdown("""
     }
     .stFileUploader {
         background-color: #ECDFCC; 
+        color: #697565;
         border-radius: 10px;
+    }
+    .stFileUploader div {
+        color: #3C3D37;
+    }
+    .stFileUploader label {
+        color: #3C3D37; 
     }
 </style>
 """, unsafe_allow_html=True)
