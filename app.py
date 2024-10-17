@@ -1,286 +1,160 @@
-import os
-import numpy as np
-import matplotlib.pyplot as plt
-from PIL import Image
 import streamlit as st
-from skimage import feature, color, segmentation
-from sklearn.preprocessing import StandardScaler
+import numpy as np
 import cv2
+import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+from PIL import Image
+from scipy import ndimage
 
-def load_images_from_folder(folder):
-    images = []
-    filenames = []
-    for filename in os.listdir(folder):
-        if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff')):
-            img_path = os.path.join(folder, filename)
-            try:
-                img = Image.open(img_path).convert('RGB')
-                images.append(img)
-                filenames.append(filename)
-                st.write(f"Loaded image: {filename}")
-            except Exception as e:
-                st.error(f"Failed to read {filename}: {e}")
-    return images, filenames
+import streamlit as st
+import numpy as np
+import cv2
+import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+from PIL import Image
+from scipy import ndimage
 
-def load_uploaded_images(uploaded_files):
-    images = []
-    filenames = []
-    for uploaded_file in uploaded_files:
-        try:
-            img = Image.open(uploaded_file).convert('RGB')
-            images.append(img)
-            filenames.append(uploaded_file.name)
-        except Exception as e:
-            st.error(f"Failed to read {uploaded_file.name}: {e}")
-    return images, filenames
+# Set page configuration
+st.set_page_config(page_title="Image Segmentation App", layout="wide")
 
-def convert_image_to_array(image):
-    return np.array(image)
+st.markdown("""
+<style>
+    .stApp {
+        background-color: #1E201E;
+        color: #ECDFCC;
+    }
+    .stButton>button {
+        width: 100%;
+        background-color: #697565;
+        color: #ECDFCC;
+    }
+    .stProgress .st-bo {
+        background-color: #ECDFCC;
+    }
+    .stSlider>div>div>div>div {
+        background-color: #ECDFCC;
+    }
+    .stSlider>div>div>div:before {
+        background-color: #ECDFCC; /* Warna krem untuk thumb (pegangan) slider */
+    }
+    .stSlider>div>div>div {
+        color: #ECDFCC; /* Ganti warna teks slider */
+    }
+    .stSelectbox>div>div {
+        background-color: #697565;
+        color: #ECDFCC;
+    }
+    .stMarkdown {
+        color: #697565;
+    }
+    .stSidebar {
+        background-color: #ECDFCC;
+    }
+    .stExpander {
+        background-color: #3C3D37;
+    }
+    .stFileUploader {
+        background-color: #ECDFCC; 
+        border-radius: 10px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-def resize_image(image_array, size=(256, 256)):
-    return cv2.resize(image_array, size, interpolation=cv2.INTER_AREA)
 
-def normalize_image(image_array):
-    return image_array / 255.0
+def preprocess_image(image, size=(128, 128)):
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image = cv2.resize(image, size)
+    return image
 
-def segment_image(image_array, n_segments=100):
-    return segmentation.slic(image_array, n_segments=n_segments, compactness=10)
-
-def extract_segment_features(image_array, segments):
-    features = []
-    for segment_id in np.unique(segments):
-        mask = segments == segment_id
-        segment = image_array[mask]
-        
-        # Color features
-        color_mean = np.mean(segment, axis= 0)
-        color_std = np.std(segment, axis=0)
-        
-        # Texture features (using grayscale image)
-        gray_segment = color.rgb2gray(segment)
-        
-        # Reshape gray_segment to 2D if it's 1D
-        if gray_segment.ndim == 1:
-            side_length = int(np.sqrt(gray_segment.shape[0]))
-            gray_segment = gray_segment[:side_length**2].reshape(side_length, side_length)
-        
-        # Ensure gray_segment is not empty
-        if gray_segment.size > 0:
-            lbp = feature.local_binary_pattern(gray_segment, P=8, R=1, method='uniform')
-            lbp_hist, _ = np.histogram(lbp.flatten(), bins=10, range=(0, 10), density=True)
-        else:
-            lbp_hist = np.zeros(10)  # Use a zero histogram if the segment is empty
-        
-        # Combine features
-        segment_features = np.concatenate([color_mean, color_std, lbp_hist])
-        features.append(segment_features)
+def plot_segmented_image(original_img, segmented_img, num_clusters):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
     
-    return np.array(features)
-
-def euclidean_distance(x1, x2):
-    return np.sqrt(np.sum((x1 - x2) ** 2))
-
-def kmeans(X, n_clusters, max_iters=100):
-    # Randomly initialize centroids
-    centroids = X[np.random.choice(X.shape[0], n_clusters, replace=False)]
+    ax1.imshow(original_img)
+    ax1.set_title("Original Image")
+    ax1.axis('off')
     
-    for _ in range(max_iters):
-        # Assign points to nearest centroid
-        distances = np.sqrt(((X - centroids[:, np.newaxis])**2).sum(axis=2))
-        labels = np.argmin(distances, axis=0)
-        
-        # Update centroids
-        new_centroids = np.array([X[labels == k].mean(axis=0) for k in range(n_clusters)])
-        
-        # Check for convergence
-        if np.all(centroids == new_centroids):
-            break
-        
-        centroids = new_centroids
+    ax2.imshow(segmented_img, cmap="viridis")
+    ax2.set_title(f"Segmented Image: {num_clusters} Clusters")
+    ax2.axis('off')
     
-    return labels, centroids
-
-def silhouette_score(X, labels):
-    unique_labels = np.unique(labels)
-    if len(unique_labels) <= 1:
-        return 0  # Only one cluster or all noise points
-    
-    silhouette_values = []
-    
-    for i in range(len(X)):
-        a = np.mean([euclidean_distance(X[i], X[j]) for j in range(len(X)) if labels[j] == labels[i] and i != j])
-        b = min([np.mean([euclidean_distance(X[i], X[j]) for j in range(len(X)) if labels[j] == label]) 
-                 for label in unique_labels if label != labels[i] and label != -1])
-        
-        silhouette_values.append((b - a) / max(a, b))
-    
-    return np.mean(silhouette_values)
-
-def visualize_clustered_segments(image_array, segments, labels, show_text=True):
-    """
-    Visualizes an image with clustered segments, optionally showing text (labels) on each segment.
-    """
-    clustered_image = image_array.copy()  # Keep the original image colors
-    unique_segments = np.unique(segments)
-
-    for idx, segment_id in enumerate(unique_segments):
-        mask = segments == segment_id
-        y, x = np.where(mask)
-        
-        if len(y) > 0 and len(x) > 0:
-            clustered_image[mask] = image_array[mask]  # Keep original colors
-            
-            # Compute the center of the segment
-            center_y, center_x = int(np.mean(y)), int(np.mean(x))
-            
-            # Get the cluster label for the current segment
-            label = labels[idx]
-            
-            # Optionally add the label as text
-            if show_text:
-                plt.text(center_x, center_y, str(label), color='red', fontsize=12, 
-                         ha='center', va='center', fontweight='bold', backgroundcolor='white')
-
-    return clustered_image
-
-
-def visualize_all_clustered_segments(images, all_segments, labels_list, n_clusters_list):
-    """
-    Visualize original images and clustered versions in a grid with a row for each cluster setting.
-    """
-    n_images = len(images)
-    n_rows = len(n_clusters_list) + 1  # Adding 1 for the original image row
-    
-    # Create a figure with appropriate size based on the number of images and clusters
-    fig, axs = plt.subplots(n_rows, n_images, figsize=(5 * n_images, 5 * n_rows))
-    plt.subplots_adjust(hspace=0.5)
-    fig.suptitle("Clustering Results", fontsize=16)
-    
-    # Display original images at the top row
-    for i, image in enumerate(images):
-        axs[0, i].imshow(image)
-        axs[0, i].axis('off')
-    axs[0, 0].set_title("Original Image", fontsize=14)
-    
-    # Perform clustering visualization for each n_clusters
-    for row, n_clusters in enumerate(n_clusters_list, start=1):
-        labels = labels_list[row - 1]
-        start_idx = 0  # Reset the starting index for each row (n_clusters)
-
-        # Process each image individually
-        for col, (image, segments) in enumerate(zip(images, all_segments)):
-            image_array = np.array(image)
-            n_segments = len(np.unique(segments))
-            
-            # Get the labels corresponding to the current image's segments
-            image_labels = labels[start_idx:start_idx + n_segments]
-            start_idx += n_segments  # Update start_idx for the next image
-            
-            # Visualize the image with its clusters and labels
-            clustered_image = visualize_clustered_segments(image_array, segments, image_labels, show_text=True)
-            axs[row, col].imshow(clustered_image)
-            axs[row, col].axis('off')
-        
-        axs[row, 0].set_title(f"{n_clusters} Clusters", fontsize=14)
+    for i in range(num_clusters):
+        mask = segmented_img == i
+        center = ndimage.measurements.center_of_mass(mask)
+        ax2.text(center[1], center[0], str(i+1), 
+                 color='white', fontsize=12, ha='center', va='center')
     
     return fig
 
-def main():
-    st.title("Segment-Level Image Clustering Application")
-    st.sidebar.header("Settings")
-    
-    # Step 1: Load images
-    st.sidebar.subheader("Load Images")
-    folder_path = st.sidebar.text_input("Enter folder path to load images:")
-    uploaded_files = st.sidebar.file_uploader("Upload your own images", accept_multiple_files=True, type=["png", "jpg", "jpeg", "bmp", "tiff"])
-    
-    if st.sidebar.button("Load Images"):
-        images = []
-        filenames = []
-        if folder_path:
-            folder_images, folder_filenames = load_images_from_folder(folder_path)
-            images.extend(folder_images)
-            filenames.extend(folder_filenames)
-        if uploaded_files:
-            uploaded_images, uploaded_filenames = load_uploaded_images(uploaded_files)
-            images.extend(uploaded_images)
-            filenames.extend(uploaded_filenames)
-        
-        if len(images) == 0:
-            st.error("No images found or uploaded.")
-            return
-        
-        st.success(f"{len(images)} images successfully loaded.")
-        st.session_state['images'] = images
-        st.session_state['filenames'] = filenames
-    
-    # Step 2: Preprocess and extract features
-    if 'images' in st.session_state:
-        st.sidebar.subheader("Preprocessing and Feature Extraction")
-        n_segments = st.sidebar.slider("Number of segments per image", 3, 10, 3)
-        
-        if st.sidebar.button("Process Images"):
-            all_features = []
-            all_segments = []
-            
-            for image in st.session_state['images']:
-                image_array = convert_image_to_array(image)
-                resized_image = resize_image(image_array)
-                normalized_image = normalize_image(resized_image)
-                segments = segment_image(normalized_image, n_segments)
-                features = extract_segment_features(normalized_image, segments)
-                
-                all_features.append(features)
-                all_segments.append(segments)
-            
-            # Combine all features
-            combined_features = np.vstack(all_features)
-            
-            # Normalize features
-            scaler = StandardScaler()
-            normalized_features = scaler.fit_transform(combined_features)
-            
-            st.session_state['all_features'] = all_features
-            st.session_state['all_segments'] = all_segments
-            st.session_state['combined_features'] = combined_features
-            st.session_state['normalized_features'] = normalized_features
-            
-            st.success("Features extracted successfully.")
-    
-    # Step 3: Clustering
-    if 'combined_features' in st.session_state:
-        st.sidebar.subheader("Clustering Settings")
-        n_clusters_list = st.sidebar.multiselect("Select numbers of clusters to try:", [2, 3, 4, 5, 6, 7], [2, 3])
-        
-        if st.sidebar.button("Perform Clustering"):
-            labels_list = []
-            silhouette_scores = []
-            
-            for n_clusters in n_clusters_list:
-                labels, _ = kmeans(st.session_state['normalized_features'], n_clusters=n_clusters)
-                labels_list.append(labels)
-                
-                score = silhouette_score(st.session_state['normalized_features'], labels)
-                silhouette_scores.append(score)
-            
-            st.session_state['labels_list'] = labels_list
-            st.session_state['n_clusters_list'] = n_clusters_list
-            st.session_state['silhouette_scores'] = silhouette_scores
-            
-            st.success("Clustering performed successfully.")
-    
-    # Step 4: Visualization
-    if 'labels_list' in st.session_state:
-        st.subheader("Clustering Results")
-        
-        fig = visualize_all_clustered_segments(
-            st.session_state['images'], 
-            st.session_state['all_segments'], 
-            st.session_state['labels_list'], 
-            st.session_state['n_clusters_list']
-        )
-        
-        st.pyplot(fig)
+def process_image(img, max_clusters):
+    preprocessed_img = preprocess_image(np.array(img))
+    pixel_values = preprocessed_img.reshape((-1, 3))
+    pixel_values = np.float32(pixel_values)
 
-if __name__ == "__main__":
-    main()
+    best_score = -1
+    best_num_clusters = 0
+    best_segmented_image = None
+    results = []
+
+    for num_clusters in range(2, max_clusters + 1):
+        kmeans = KMeans(n_clusters=num_clusters, random_state=42)
+        labels = kmeans.fit_predict(pixel_values)
+        segmented_img = labels.reshape(preprocessed_img.shape[:2])
+        
+        score = silhouette_score(pixel_values, labels)
+        results.append((num_clusters, score, segmented_img))
+
+        if score > best_score:
+            best_score = score
+            best_num_clusters = num_clusters
+            best_segmented_image = segmented_img
+
+    return best_score, best_num_clusters, best_segmented_image, preprocessed_img, results
+
+# Streamlit App
+st.title("🖼️ Multi-Image Segmentation using K-means Clustering 🖼️")
+
+st.sidebar.header("Settings")
+max_clusters = st.sidebar.slider("Max number of clusters", 2, 10, 5)
+uploaded_files = st.sidebar.file_uploader("Upload images", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+
+if uploaded_files:
+    if st.sidebar.button("Run K-means Clustering", key="run_button"):
+        for idx, uploaded_file in enumerate(uploaded_files):
+            st.header(f"📊 Processing image: {uploaded_file.name}")
+            
+            img = Image.open(uploaded_file)
+            
+            with st.spinner("Clustering in progress..."):
+                best_score, best_num_clusters, best_segmented_image, preprocessed_img, results = process_image(img, max_clusters)
+
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("Original Image")
+                st.image(img, use_column_width=True)
+            
+            with col2:
+                st.subheader("Best Segmentation Result")
+                fig = plot_segmented_image(preprocessed_img, best_segmented_image, best_num_clusters)
+                st.pyplot(fig)
+
+            st.success(f"Best Silhouette Score: {best_score:.4f} (with {best_num_clusters} clusters)")
+
+            # Display all results in an expander
+            with st.expander("See all segmentation results"):
+                for num_clusters, score, segmented_img in results:
+                    st.write(f"Clusters: {num_clusters}, Silhouette Score: {score:.4f}")
+                    fig = plot_segmented_image(preprocessed_img, segmented_img, num_clusters)
+                    st.pyplot(fig)
+
+            # Progress bar
+            st.progress((idx + 1) / len(uploaded_files))
+            
+            if idx < len(uploaded_files) - 1:
+                st.markdown("---")
+else:
+    st.info("Please upload one or more images to begin segmentation.")
+
+st.sidebar.markdown("---")
