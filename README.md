@@ -13,35 +13,8 @@ Aplikasi berbasis Streamlit untuk melakukan segmentasi gambar menggunakan algori
 -   ✅ Antarmuka pengguna yang elegan dan ramah mata (mendukung mode gelap).
 
 ---
-
-## 📦 Instalasi
-
-### 1. Kloning Repositori
-```bash
-git clone [https://github.com/username/image-segmentation-app.git](https://github.com/username/image-segmentation-app.git)
-cd image-segmentation-app
-```
-
-### 2. Buat dan Aktifkan Environment (Opsional tapi disarankan)
-```bash
-# Untuk macOS/Linux
-python3 -m venv venv
-source venv/bin/activate
-
-# Untuk Windows
-python -m venv venv
-venv\Scripts\activate
-```
-
-### 3. Instal Dependensi
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Jalankan Aplikasi
-```bash
-streamlit run app.py
-```
+## 📱 Link Aplikasi
+https://mini-proyek-datmin-6m3rbnvbrcut8prqmtgqmg.streamlit.app/
 
 ---
 
@@ -49,7 +22,7 @@ streamlit run app.py
 
 | Gambar Asli | Gambar Tersegmentasi |
 | :---------: | :------------------: |
-|  *[Contoh Gambar Asli]* | *[Contoh Gambar Hasil Segmentasi]* |
+|  ![image](https://github.com/user-attachments/assets/6992ae8e-57c9-4eee-b886-0f4ef47685e9)| ![image](https://github.com/user-attachments/assets/3c75cfef-6f0c-4f3e-a332-4b950c27cec3)|
 
 ---
 
